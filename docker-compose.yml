@@ -1,0 +1,222 @@
+---
+version: "3"
+services:
+  traefik:
+    image: traefik:v2.11
+    container_name: traefik
+    restart: always
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --log.level=DEBUG
+      - --api.insecure=true
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.myresolver.acme.dnschallenge=true
+      - --certificatesresolvers.myresolver.acme.dnschallenge.provider=gandiv5
+      #- --certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/access.log
+    ports:
+      - 80:80
+      #- 8081:8080
+      - 443:443
+    environment:
+      - GANDIV5_API_KEY=${GANDIV5_API_KEY}
+    volumes:
+      - ./letsencrypt:/letsencrypt:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  gluetun:
+    image: qmcgaw/gluetun:v3
+    container_name: gluetun
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - 8080:8080 # qbittorrent
+      - 8989:8989 # Sonarr
+      - 9696:9696 # Prowlarr
+      - 7878:7878 # Radarr
+      - 8191:8191 # Flaresolverr
+      - 6767:6767 # Bazarr
+      - 8042:8042 # Joal
+    volumes:
+      - ./gluetun-config:/gluetun:rw
+      - ./gluetun-config/wireguard:/gluetun/wireguard:ro
+    environment:
+      - VPN_SERVICE_PROVIDER=custom
+      - VPN_TYPE=wireguard
+      - TZ=${TZ}
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      # qbittorrent
+      - "traefik.http.routers.qbittorrent.rule=Host(`qbittorrent${SUBDOMAIN}`)"
+      - "traefik.http.routers.qbittorrent.entrypoints=websecure"
+      - "traefik.http.routers.qbittorrent.service=qbittorrent"
+      - "traefik.http.routers.qbittorrent.tls.certresolver=myresolver"
+      - "traefik.http.services.qbittorrent.loadbalancer.server.port=8080"
+      # Sonarr
+      - "traefik.http.routers.sonarr.rule=Host(`sonarr${SUBDOMAIN}`)"
+      - "traefik.http.routers.sonarr.entrypoints=websecure"
+      - "traefik.http.routers.sonarr.service=sonarr"
+      - "traefik.http.routers.sonarr.tls.certresolver=myresolver"
+      - "traefik.http.services.sonarr.loadbalancer.server.port=8989"
+      # Prowlarr
+      - "traefik.http.routers.prowlarr.rule=Host(`prowlarr${SUBDOMAIN}`)"
+      - "traefik.http.routers.prowlarr.entrypoints=websecure"
+      - "traefik.http.routers.prowlarr.service=prowlarr"
+      - "traefik.http.routers.prowlarr.tls.certresolver=myresolver"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=9696"
+      # Radarr
+      - "traefik.http.routers.radarr.rule=Host(`radarr${SUBDOMAIN}`)"
+      - "traefik.http.routers.radarr.entrypoints=websecure"
+      - "traefik.http.routers.radarr.service=radarr"
+      - "traefik.http.routers.radarr.tls.certresolver=myresolver"
+      - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+      #Bazarr
+      - "traefik.http.routers.bazarr.rule=Host(`bazarr${SUBDOMAIN}`)"
+      - "traefik.http.routers.bazarr.entrypoints=websecure"
+      - "traefik.http.routers.bazarr.service=bazarr"
+      - "traefik.http.routers.bazarr.tls.certresolver=myresolver"
+      - "traefik.http.services.bazarr.loadbalancer.server.port=6767"
+    depends_on:
+      - traefik
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:5.3.6
+    container_name: radarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./radarr-config:/config:rw
+      - ${MEDIA_DIR}:/media:rw
+      - ${DOWNLOAD_DIR}:/downloads:rw
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:3.0.10
+    container_name: sonarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./sonarr-config:/config:rw
+      - ${MEDIA_DIR}:/media:rw
+      - ${DOWNLOAD_DIR}:/downloads:rw
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:1.15.0
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ./prowlarr-config:/config:rw
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:4.6.3
+    container_name: qbittorrent
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+    volumes:
+      - ./qbittorrent-config:/config:rw
+      - ${DOWNLOAD_DIR}:/downloads:rw
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.3.15
+    container_name: flaresolverr
+    environment:
+      - TZ=${TZ}
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - BROWSER_TIMEOUT=80000
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:1.3.1
+    container_name: bazarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}0
+      - TZ=${TZ}
+    volumes:
+      - ./bazarr-config:/config
+      - ${MEDIA_DIR}:/media/:rw
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  joal:
+    image: anthonyraymond/joal:2.1.36
+    container_name: joal
+    volumes:
+      - ./joal/resources:/data
+    command: ["--joal-conf=/data", "--spring.main.web-environment=true", "--server.port=8042", "--joal.ui.path.prefix=joal", "--joal.ui.secret-token=joal"]
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:1.7.0
+    container_name: jellyseerr
+    environment:
+      - LOG_LEVEL=debug
+      - TZ=${TZ}
+    ports:
+      - 5056:5055
+    volumes:
+      - ./jellyseerr-config:/app/config
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr${SUBDOMAIN}`)"
+      - "traefik.http.routers.jellyseerr.entrypoints=websecure"
+      - "traefik.http.routers.jellyseerr.service=jellyseerr"
+      - "traefik.http.routers.jellyseerr.tls.certresolver=myresolver"
+      - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+
+  whisperasr:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisperasr
+    environment:
+      - ASR_MODEL=small
+      - ASR_ENGINE=faster_whisper
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
