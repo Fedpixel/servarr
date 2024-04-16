@@ -88,9 +88,12 @@ services:
       - "traefik.http.services.bazarr.loadbalancer.server.port=6767"
     depends_on:
       - traefik
+    dns:
+      - "1.0.0.1"
+      - "1.1.1.1"
 
   radarr:
-    image: lscr.io/linuxserver/radarr:5.3.6
+    image: lscr.io/linuxserver/radarr:5.4.6
     container_name: radarr
     environment:
       - PUID=${PUID}
@@ -192,7 +195,7 @@ services:
     restart: unless-stopped
 
   jellyseerr:
-    image: fallenbagel/jellyseerr:1.7.0
+    image: fallenbagel/jellyseerr:1.8.0
     container_name: jellyseerr
     environment:
       - LOG_LEVEL=debug
