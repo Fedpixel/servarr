@@ -1,4 +1,5 @@
 ---
+version: "3"
 services:
   traefik:
     image: traefik:v2.11
@@ -31,7 +32,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   gluetun:
-    image: qmcgaw/gluetun
+    image: qmcgaw/gluetun:v3
     container_name: gluetun
     cap_add:
       - NET_ADMIN
@@ -43,6 +44,7 @@ services:
       - 9696:9696 # Prowlarr
       - 7878:7878 # Radarr
       - 8191:8191 # Flaresolverr
+      - 6767:6767 # Bazarr
       - 8042:8042 # Joal
     volumes:
       - ./gluetun-config:/gluetun:rw
@@ -78,6 +80,12 @@ services:
       - "traefik.http.routers.radarr.service=radarr"
       - "traefik.http.routers.radarr.tls.certresolver=myresolver"
       - "traefik.http.services.radarr.loadbalancer.server.port=7878"
+      #Bazarr
+      - "traefik.http.routers.bazarr.rule=Host(`bazarr${SUBDOMAIN}`)"
+      - "traefik.http.routers.bazarr.entrypoints=websecure"
+      - "traefik.http.routers.bazarr.service=bazarr"
+      - "traefik.http.routers.bazarr.tls.certresolver=myresolver"
+      - "traefik.http.services.bazarr.loadbalancer.server.port=6767"
     depends_on:
       - traefik
     dns:
@@ -85,7 +93,7 @@ services:
       - "1.1.1.1"
 
   radarr:
-    image: lscr.io/linuxserver/radarr:latest
+    image: lscr.io/linuxserver/radarr:5.4.6
     container_name: radarr
     environment:
       - PUID=${PUID}
@@ -101,7 +109,7 @@ services:
     restart: unless-stopped
 
   sonarr:
-    image: lscr.io/linuxserver/sonarr:latest
+    image: lscr.io/linuxserver/sonarr:3.0.10
     container_name: sonarr
     environment:
       - PUID=${PUID}
@@ -117,7 +125,7 @@ services:
     restart: unless-stopped
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
+    image: lscr.io/linuxserver/prowlarr:1.15.0
     container_name: prowlarr
     environment:
       - PUID=${PUID}
@@ -131,7 +139,7 @@ services:
     restart: unless-stopped
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:4.6.4
     container_name: qbittorrent
     environment:
       - PUID=${PUID}
@@ -147,34 +155,47 @@ services:
     restart: unless-stopped
 
   flaresolverr:
-    image: 21hsmw/flaresolverr:nodriver
-    #image: ghcr.io/flaresolverr/flaresolverr:latest
+    image: ghcr.io/flaresolverr/flaresolverr:v3.3.16
     container_name: flaresolverr
     environment:
-      - DRIVER=nodriver
       - TZ=${TZ}
-      - LOG_LEVEL=debug
-      - LOG_HTML=true
-      - LANG=fr_FR
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
       - BROWSER_TIMEOUT=80000
     network_mode: "service:gluetun"
     depends_on:
       - gluetun
     restart: unless-stopped
 
-#  joal:
-#    image: anthonyraymond/joal:2.1.36
-#    container_name: joal
-#    volumes:
-#      - ./joal/resources:/data
-#    command: ["--joal-conf=/data", "--spring.main.web-environment=true", "--server.port=8042", "--joal.ui.path.prefix=joal", "--joal.ui.secret-token=joal"]
-#    network_mode: "service:gluetun"
-#    depends_on:
-#      - gluetun
-#    restart: unless-stopped
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:1.4.2
+    container_name: bazarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}0
+      - TZ=${TZ}
+    volumes:
+      - ./bazarr-config:/config
+      - ${MEDIA_DIR}:/media/:rw
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
+
+  joal:
+    image: anthonyraymond/joal:2.1.36
+    container_name: joal
+    volumes:
+      - ./joal/resources:/data
+    command: ["--joal-conf=/data", "--spring.main.web-environment=true", "--server.port=8042", "--joal.ui.path.prefix=joal", "--joal.ui.secret-token=joal"]
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
 
   jellyseerr:
-    image: fallenbagel/jellyseerr:latest
+    image: fallenbagel/jellyseerr:1.8.1
     container_name: jellyseerr
     environment:
       - LOG_LEVEL=debug
@@ -186,8 +207,19 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr${SUBDOMAIN}`,`jellyseerr.internal.${SUBDOMAIN}`)"
+      - "traefik.http.routers.jellyseerr.rule=Host(`jellyseerr${SUBDOMAIN}`)"
       - "traefik.http.routers.jellyseerr.entrypoints=websecure"
       - "traefik.http.routers.jellyseerr.service=jellyseerr"
       - "traefik.http.routers.jellyseerr.tls.certresolver=myresolver"
       - "traefik.http.services.jellyseerr.loadbalancer.server.port=5055"
+
+  whisperasr:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisperasr
+    environment:
+      - ASR_MODEL=small
+      - ASR_ENGINE=faster_whisper
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
+    restart: unless-stopped
